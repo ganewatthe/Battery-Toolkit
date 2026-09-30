@@ -52,10 +52,12 @@ discover the successor of a removed key.
 
 Known limitations on this firmware generation:
 
-- The power adapter key (`CHIE`) reads `0x08` here while powered via USB-C,
-  where the daemon expects `0x00` for "adapter enabled". This may be specific
-  to non-MagSafe power sources or a firmware semantic change; the adapter
-  disable feature needs verification. The charge limit itself is unaffected.
+- Power adapter disable/enable works on this firmware with the Tahoe-era
+  values (`CHIE` cut = `0x08`, legacy `CH0J` cut = `0x20`, enabled = `0x00`
+  on both), but the cut engages with a delay of several seconds — don't
+  mistake a short window without effect for a broken feature. SMC writes to
+  these keys appear sticky when the adapter is cut, so always restore the
+  enabled value (`0x00`) afterwards.
 - Later security updates (macOS 26.7+ / 27, see charlie0129/batt issues
   #151/#152) gate the `bf*` keys behind a private entitlement, which would
   disable charging control entirely on those builds. The firmware this fork

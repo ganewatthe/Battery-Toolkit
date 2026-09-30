@@ -69,6 +69,44 @@ static void probeValue(const char *name) {
     printf("  (LE u32: %u)\n", le);
 }
 
+static bool writeValue(const char *name, const char *hexBytes) {
+    size_t count = strlen(hexBytes) / 2;
+    if (count == 0 || count > 4) {
+        printf("%s: invalid write value %s\n", name, hexBytes);
+        return false;
+    }
+
+    uint8_t bytes[4] = {0};
+    for (size_t i = 0; i < count; i++) {
+        unsigned b = 0;
+        if (sscanf(hexBytes + 2 * i, "%2x", &b) != 1) {
+            printf("%s: invalid hex %s\n", name, hexBytes);
+            return false;
+        }
+        bytes[i] = (uint8_t)b;
+    }
+
+    SMCParamStruct in = {0}, out = {0};
+    in.key = keyFrom(name);
+    in.keyInfo.dataSize = (uint32_t)count;
+    in.data8 = kSMCWriteKey;
+    memcpy(in.bytes, bytes, count);
+    IOReturn result = callSMC(&in, &out);
+    if (result != kSMCSuccess) {
+        printf("%s: write failed (result=%u)\n", name, result);
+        return false;
+    }
+
+    printf("%s: wrote %zu byte(s):", name, count);
+    for (size_t i = 0; i < count; i++) {
+        printf(" %02x", bytes[i]);
+    }
+    printf("\n");
+
+    probeValue(name);
+    return true;
+}
+
 int main(int argc, char **argv) {
     setvbuf(stdout, NULL, _IOLBF, 0);
 
@@ -90,6 +128,13 @@ int main(int argc, char **argv) {
 
     if (argc > 1) {
         for (int i = 1; i < argc; i++) {
+            char *eq = strchr(argv[i], '=');
+            if (eq != NULL) {
+                *eq = '\0';
+                probeInfo(argv[i]);
+                writeValue(argv[i], eq + 1);
+                continue;
+            }
             probeInfo(argv[i]);
             probeValue(argv[i]);
         }
