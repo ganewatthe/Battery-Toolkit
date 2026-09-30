@@ -125,7 +125,10 @@ internal enum BTPowerState {
             return true
         }
 
-        let success = SMCComm.Power.disableCharging()
+        let success = SMCComm.Power.disableCharging(
+            lower: UInt32(BTSettings.minCharge),
+            upper: UInt32(BTSettings.maxCharge)
+        )
         guard success else {
             os_log("Failed to disable charging")
             return false

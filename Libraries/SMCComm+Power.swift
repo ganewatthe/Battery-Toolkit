@@ -17,6 +17,12 @@ public extension SMCComm {
 
         private static var chargeKey = 0
         private static var adapterKey = 0
+        //
+        // Newer SMC firmware removed the direct charging control keys. On
+        // these platforms, the firmware itself enforces charge hysteresis
+        // limits, which are configured via dedicated keys instead.
+        //
+        private static var firmwareLimitMode = false
 
         static func supported() -> Bool {
             //
@@ -25,12 +31,20 @@ public extension SMCComm {
             let chargeKey = self.chargeKeys.firstIndex { key in
                 SMCComm.keySupported(keyInfo: key.keyInfo)
             }
-            guard let chargeKey = chargeKey else {
+            if let chargeKey = chargeKey {
+                self.chargeKey = chargeKey
+                self.firmwareLimitMode = false
+            } else if
+                SMCComm.keySupported(keyInfo: Keys.FirmwareLimitActivation) &&
+                SMCComm.keySupported(keyInfo: Keys.FirmwareLimitUpper) &&
+                SMCComm.keySupported(keyInfo: Keys.FirmwareLimitLower)
+            {
+                self.firmwareLimitMode = true
+            } else {
                 return false;
             }
-            self.chargeKey = chargeKey
-            
-            
+
+
             let adapterKey = self.adapterKeys.firstIndex { key in
                 SMCComm.keySupported(keyInfo: key.keyInfo)
             }
@@ -43,13 +57,64 @@ public extension SMCComm {
         }
 
         static func enableCharging() -> Bool {
+            if self.firmwareLimitMode {
+                //
+                // Charging is allowed by deactivating the firmware limit.
+                //
+                return SMCComm.writeKey(
+                    key: Keys.FirmwareLimitActivation.key,
+                    bytes: [0x00]
+                )
+            }
+
             return SMCComm.writeKey(
                 key: self.chargeKeys[self.chargeKey].keyInfo.key,
                 bytes: self.chargeKeys[self.chargeKey].onBytes
             )
         }
 
-        static func disableCharging() -> Bool {
+        static func disableCharging(lower: UInt32, upper: UInt32) -> Bool {
+            if self.firmwareLimitMode {
+                //
+                // The firmware enforces charging only within the given
+                // limits, i.e., charges to the lower limit once the charge
+                // drops below it and stops at the upper limit. The activation
+                // key must be written last.
+                //
+                guard lower < upper, upper <= 100 else {
+                    return false
+                }
+
+                let upperBytes = self.LEBytesFromUInt32(upper)
+                let lowerBytes = self.LEBytesFromUInt32(lower)
+
+                guard SMCComm.writeKey(
+                    key: Keys.FirmwareLimitActivation.key,
+                    bytes: [0x00]
+                ) else {
+                    return false
+                }
+
+                guard SMCComm.writeKey(
+                    key: Keys.FirmwareLimitUpper.key,
+                    bytes: upperBytes
+                ) else {
+                    return false
+                }
+
+                guard SMCComm.writeKey(
+                    key: Keys.FirmwareLimitLower.key,
+                    bytes: lowerBytes
+                ) else {
+                    return false
+                }
+
+                return SMCComm.writeKey(
+                    key: Keys.FirmwareLimitActivation.key,
+                    bytes: [0x02]
+                )
+            }
+
             return SMCComm.writeKey(
                 key: self.chargeKeys[self.chargeKey].keyInfo.key,
                 bytes: self.chargeKeys[self.chargeKey].offBytes
@@ -57,6 +122,18 @@ public extension SMCComm {
         }
 
         static func isChargingDisabled() -> Bool {
+            if self.firmwareLimitMode {
+                let value = SMCComm.readKey(
+                    key: Keys.FirmwareLimitActivation.key,
+                    dataSize: 1
+                )
+                guard let value else {
+                    return false
+                }
+
+                return value == [0x02]
+            }
+
             let value = SMCComm.readKey(
                 key: self.chargeKeys[self.chargeKey].keyInfo.key,
                 dataSize: self.chargeKeys[self.chargeKey].onBytes.count
@@ -130,6 +207,30 @@ private extension SMCComm.Power {
                 dataAttributes: 0xD4
             )
         )
+        static let FirmwareLimitActivation = SMCComm.KeyInfo(
+            key: SMCComm.Key("b", "f", "F", "0"),
+            info: SMCComm.KeyInfoData(
+                dataSize: 1,
+                dataType: SMCComm.KeyTypes.ui8,
+                dataAttributes: 0xD4
+            )
+        )
+        static let FirmwareLimitUpper = SMCComm.KeyInfo(
+            key: SMCComm.Key("b", "f", "D", "0"),
+            info: SMCComm.KeyInfoData(
+                dataSize: 4,
+                dataType: SMCComm.KeyTypes.ui32,
+                dataAttributes: 0xD4
+            )
+        )
+        static let FirmwareLimitLower = SMCComm.KeyInfo(
+            key: SMCComm.Key("b", "f", "E", "0"),
+            info: SMCComm.KeyInfoData(
+                dataSize: 4,
+                dataType: SMCComm.KeyTypes.ui32,
+                dataAttributes: 0xD4
+            )
+        )
     }
     
     private struct KeyControl {
@@ -157,5 +258,18 @@ private extension SMCComm.Power {
             onBytes: [0x00],
             offBytes: [0x20]
         )
+    }
+
+    //
+    // The firmware limit keys encode percentages little-endian, unlike
+    // conventional SMC ui32 keys.
+    //
+    private static func LEBytesFromUInt32(_ value: UInt32) -> [UInt8] {
+        return [
+            UInt8(truncatingIfNeeded: value),
+            UInt8(truncatingIfNeeded: value >> 8),
+            UInt8(truncatingIfNeeded: value >> 16),
+            UInt8(truncatingIfNeeded: value >> 24)
+        ]
     }
 }
