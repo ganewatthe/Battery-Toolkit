@@ -153,6 +153,21 @@ public extension SMCComm {
         }
 
         static func disablePowerAdapter() -> Bool {
+            if self.firmwareLimitMode {
+                //
+                // The firmware limit controls the power path and suppresses
+                // the adapter cut. Deactivate it first; it will be
+                // re-activated by the charging logic once the adapter is
+                // enabled again.
+                //
+                guard SMCComm.writeKey(
+                    key: Keys.FirmwareLimitActivation.key,
+                    bytes: [0x00]
+                ) else {
+                    return false
+                }
+            }
+
             return SMCComm.writeKey(
                 key: self.adapterKeys[self.adapterKey].keyInfo.key,
                 bytes: self.adapterKeys[self.adapterKey].offBytes

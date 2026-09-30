@@ -186,6 +186,11 @@ internal enum BTPowerState {
         }
 
         self.powerDisabled = true
+        //
+        // On firmware limit platforms, the firmware limit was deactivated to
+        // allow the adapter cut, so the cached charging state changed.
+        //
+        self.chargingDisabled = SMCComm.Power.isChargingDisabled()
         return true
     }
 
@@ -201,6 +206,11 @@ internal enum BTPowerState {
         }
 
         self.powerDisabled = false
+        //
+        // Re-sync the charging state, as the firmware limit may have been
+        // re-activated while the adapter was disabled.
+        //
+        self.chargingDisabled = SMCComm.Power.isChargingDisabled()
 
         if BTSettings.magSafeSync {
             let (percent, _, _) = self.getPercentRemaining()
